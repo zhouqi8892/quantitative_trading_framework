@@ -1,0 +1,6 @@
+{
+    "python.pythonPath": "C:\\Users\\user\\Anaconda3\\envs\\quantitative_trading_sys_env\\python.exe",
+    "code-runner.executorMap": {
+        "python": "set PYTHONIOENCODING=utf-8 && C:\\Users\\user\\Anaconda3\\envs\\quantitative_trading_sys_env\\python.exe",
+        },
+}
