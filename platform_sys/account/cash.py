@@ -1,9 +1,12 @@
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from .model import cash_account_fun
-from .settings import db_url_dict, account
 from sqlalchemy import create_engine
 import pandas as pd
+import json
+
+with open('./platform_sys/settings/DB_url_settings.json') as f:
+    db_url_dict = json.load(f)
 
 
 class cash_account:
@@ -16,7 +19,7 @@ class cash_account:
     def orm_init(self):
         Base = declarative_base()
         table = cash_account_fun(Base, self.__table_name)
-        engine = create_engine(db_url_dict[account.cash])
+        engine = create_engine(db_url_dict['cash'])
         DBSession = sessionmaker(bind=engine)
         session = DBSession()
         return session, table
@@ -25,7 +28,7 @@ class cash_account:
         '''写为method非attr的原因：实例化赋值attr时，为首次session，而后session变化attr不变。
         而method保证了引用最新的session。
         全账户信息dataframe呈现'''
-        engine = create_engine(db_url_dict[account.cash])
+        engine = create_engine(db_url_dict['cash'])
         return pd.read_sql(self.__table_name, engine)
 
     def currency(self):

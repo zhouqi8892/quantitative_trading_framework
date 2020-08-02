@@ -11,13 +11,10 @@ class order_cost(Enum):
 def get_available_list(code, amount, historical_df, current_date):
     '''用于判断待买卖股票是否在市场上有数据（可交易），
     return code、amount、price去除不可买后的list'''
-    assert (type(code) is list and type(code[0]) is str
-            ) or type(code) is str, 'code shoule be str or list with str'
-    assert (type(amount) is list and type(amount[0]) is int
+    assert isinstance(
+        code, list) or type(code) is str, 'code shoule be str or list with str'
+    assert (isinstance(amount, list) and isinstance(amount[0], np.int32)
             ) or type(amount) is int, 'amount should be int or list with int'
-    assert (type(code) is list and type(amount) is list
-            and len(code) == len(amount)
-            ), 'code_list and amount_list should have same length'
     code_list = np.array(code if type(code) is list else [code])
     amount_list = np.array(amount if type(amount) is list else [amount])
     code_available_list = [
@@ -50,11 +47,11 @@ def trade_cost_cal(amount_list, price_list, trade_cost):
     '''券商手续费双向收取，印花税卖出时收取，后期甄别'''
     market_value_list = np.abs(amount_list) * price_list
     brokerage_fee = np.maximum(
-        trade_cost[order_cost.brokerage_fee][0] * market_value_list,
-        trade_cost[order_cost.brokerage_fee][1])
+        trade_cost[order_cost.brokerage_fee.name][0] * market_value_list,
+        trade_cost[order_cost.brokerage_fee.name][1])
     market_value_list[amount_list > 0] = 0
     market_value_list[amount_list < 0] = market_value_list[
-        amount_list < 0] * trade_cost[order_cost.stamp_tax]
+        amount_list < 0] * trade_cost[order_cost.stamp_tax.name]
     stamp_tax = market_value_list
     return np.round(brokerage_fee + stamp_tax, 2)
 

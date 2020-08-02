@@ -30,13 +30,13 @@ def stock_account_linkage(session, table, code, amount, price, extra_fee,
             result.avg_cost = (result.avg_cost * result.total_amount +
                                total_cost) / (result.total_amount + amount)
             result.today_buy_amount += amount
-        result.transaction_time = context.current_date
+        result.transaction_time = context.current_time
         if amount < 0:
             #挂单时locked_amount增加，现在减回去
             result.locked_amount += amount
         result.total_amount += amount
         result.market_value = price * result.total_amount
-        result.transaction_time = context.current_date
+        result.transaction_time = context.current_time
         # session.commit()
         # session.close()
     else:  # 建仓
@@ -45,8 +45,8 @@ def stock_account_linkage(session, table, code, amount, price, extra_fee,
                           market_value=price * amount,
                           acc_avg_cost=(price * amount + extra_fee) / amount,
                           avg_cost=(price * amount + extra_fee) / amount,
-                          init_time=context.current_date,
-                          transaction_time=context.current_date,
+                          init_time=context.current_time,
+                          transaction_time=context.current_time,
                           locked_amount=0,
                           total_amount=amount,
                           tradable_amount=0,
@@ -131,7 +131,7 @@ def open_market_adjust(context):
     table_stock = context.stock_account.table
     results = session_stock.query(table_stock).all()
     code_list = [result.code for result in results]
-    df_result = historical_df[(historical_df.date == context.current_date)
+    df_result = historical_df[(historical_df.date == context.current_time)
                               & (historical_df.code.isin(code_list))]
     code_list = df_result.code.values
     price_list = df_result.price.values
