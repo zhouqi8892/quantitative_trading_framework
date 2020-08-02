@@ -18,7 +18,8 @@ class Order:
 
     __slots__ = [
         'code', 'order_type', 'price', 'type_chosen', 'kwargs_keys',
-        'order_dealt_time', 'order_establish_time', 'METHOD_chosen'
+        'order_dealt_time', 'order_establish_time', 'METHOD_chosen',
+        'TYPE_chosen'
     ] + ORDER_TYPE
 
     def __init__(self, code, order_type='mkt', **kwargs):
@@ -30,7 +31,7 @@ class Order:
                 '[Order] indicate one of amount/target_amount/value/target_value parameter'
             )
         else:
-            TYPE_chosen = np.array(list(
+            self.TYPE_chosen = np.array(list(
                 kwargs.keys()))[ORDER_TYPE_test_boolean][0]
 
         # validate combination of order_type and price
@@ -55,13 +56,6 @@ class Order:
                                       (list, np.ndarray)) else np.array(code)
         self.order_type = order_type
         self.kwargs_keys = list(kwargs.keys())
-        ORDER_METHOD = dict(amount=self.order,
-                            target_amount=self.order_target,
-                            value=self.order_value,
-                            target_value=self.order_target_value)
-        self.METHOD_chosen = partial(
-            ORDER_METHOD[TYPE_chosen],
-            **{TYPE_chosen: getattr(self, TYPE_chosen)})
 
         # test for length of each input list
         if len(set(len_test_list + [len(self.code)])) != 1:
@@ -96,7 +90,7 @@ class Order:
 
     def order_split(self, boolean_array):
         '''split into two Order object with available and unavailable orders'''
-        valid_order = self.__class__(
+        valid_order = valid_Order(
             self.code[boolean_array], self.order_type,
             **{k: getattr(self, k)[boolean_array]
                for k in self.kwargs_keys})(self.order_establish_time)
@@ -139,9 +133,22 @@ class Order:
         '''add information for dealt order. e.g., canceled time'''
         setattr(self, 'order_canceled_time', cur_time)
 
+
+class valid_Order(Order):
+    def __init__(self, code, order_type, **kwargs):
+        super().__init__(code=code, order_type=order_type, **kwargs)
+        ORDER_METHOD = dict(amount=self.order,
+                            target_amount=self.order_target,
+                            value=self.order_value,
+                            target_value=self.order_target_value)
+        self.METHOD_chosen = partial(
+            ORDER_METHOD[self.TYPE_chosen],
+            **{self.TYPE_chosen: getattr(self, self.TYPE_chosen)})
+
     def order(self, amount, context):
         code_list, amount_list, price_list = get_available_list(
-            list(self.code), list(amount), historical_data_df, self.order_dealt_time)
+            list(self.code), list(amount), historical_data_df,
+            self.order_dealt_time)
         if len(code_list) == 0:
             print('选中股票市场上无数据，无法请求交易')
             return
@@ -195,8 +202,6 @@ class Order:
     @staticmethod
     def order_target_value(code, target_value, context):
         pass
-
-
 
 
 class order_hub():
