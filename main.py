@@ -2,6 +2,7 @@ from platform_sys.execution.back_test import Hub
 from platform_sys.account.settings import account
 from platform_sys.action.settings import order_cost
 from functools import partial
+from datetime import datetime
 '''
 1.确定回测阶段
 2.确定回测频率
@@ -22,14 +23,15 @@ class config:
 
 
 if __name__ == "__main__":
-    # starttime = datetime.now()
 
     # back_test_init(config)
     # from mongoengine import connect
     # a = connect('test', host='mongodb：// localhost / china_money_benchmark')
-    # endtime = datetime.now()
-
-    # print('回测完成，总耗时%s秒' % (endtime - starttime).seconds)
 
     # partial(Hub, config)  #partial to fix config, input hyperparameters, aka optimization paras
+    starttime = datetime.now()
     Hub(config).back_test()
+    endtime = datetime.now()
+    print(
+        f'backtest finished, time elapsed {(endtime - starttime).seconds} seconds'
+    )

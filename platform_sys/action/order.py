@@ -10,16 +10,13 @@ with shelve.open(r'.\platform_sys\settings\order', flag='n') as order_shelve:
 
 
 class Order:
-    '''code[para] must be indicated
-    choose to indicate one of amount/target_amount/value/target_value
-    if order_type="lmt", must define price, otherwise, "mkt" by default
-    '''
+    '''integrated order command'''
+
     ORDER_TYPE = ['amount', 'target_amount', 'value', 'target_value']
 
     __slots__ = [
         'code', 'order_type', 'price', 'type_chosen', 'kwargs_keys',
-        'order_dealt_time', 'order_establish_time', 'METHOD_chosen',
-        'TYPE_chosen'
+        'order_dealt_time', 'order_establish_time', 'TYPE_chosen'
     ] + ORDER_TYPE
 
     def __init__(self, code, order_type='mkt', **kwargs):
@@ -68,6 +65,11 @@ class Order:
             order_shelve[key] = self
             order_shelve['0'] += 1
 
+    def __str__(self):
+        return 'code[para] must be indicated\n\
+            choose to indicate one of amount/target_amount/value/target_value\n\
+            if order_type="lmt", must define price, otherwise, "mkt" by default'
+
     def __call__(self, current_time):
         self.order_establish_time = current_time
         return self
@@ -89,7 +91,9 @@ class Order:
         return self.order_split(boolean_array)
 
     def order_split(self, boolean_array):
-        '''split into two Order object with available and unavailable orders'''
+        '''split into two Order object with valid and invalid orders'''
+        # two new object
+        # 尝试精简化用于valid/invalid和valid/dealt/cancel剥离
         valid_order = valid_Order(
             self.code[boolean_array], self.order_type,
             **{k: getattr(self, k)[boolean_array]
@@ -116,6 +120,7 @@ class Order:
         elif self.order_type == 'lmt':
             # 目前未考虑分批成交，若lmt必然会分批成交，届时需将订单拆分同order_plit操作
             # some of stocks in the order will deal, some will not --> need split
+            # 分批成交，如果len(dealt_order.code)=0，须返回None,以不执行METHOD_chosen操作
             pass
         return valid_order, dealt_order, canceled_order
 
@@ -124,9 +129,11 @@ class Order:
         self.order_dealt_time = cur_time
         # !!!should consider slippage!!!
         if self.order_type == 'mkt':
+            tmp_price_list = []
             for code in self.code:
-                self.price = historical_data_df.query(
-                    'code == @code and date == @cur_time')['price'].iloc[0]
+                tmp_price_list += [historical_data_df.query(
+                    'code == @code and date == @cur_time')['price'].iloc[0]]
+            self.price = np.array(tmp_price_list)
         return self
 
     def canceled_order(self, cur_time):
@@ -141,17 +148,10 @@ class valid_Order(Order):
                             target_amount=self.order_target,
                             value=self.order_value,
                             target_value=self.order_target_value)
-        self.METHOD_chosen = partial(
-            ORDER_METHOD[self.TYPE_chosen],
-            **{self.TYPE_chosen: getattr(self, self.TYPE_chosen)})
+        self.METHOD_chosen = ORDER_METHOD[self.TYPE_chosen]
 
-    def order(self, amount, context):
-        code_list, amount_list, price_list = get_available_list(
-            list(self.code), list(amount), historical_data_df,
-            self.order_dealt_time)
-        if len(code_list) == 0:
-            print('选中股票市场上无数据，无法请求交易')
-            return
+    def order(self, context):
+        code_list, amount_list, price_list = self.code, self.amount, self.price
         amount_list = (np.floor(amount_list / 100) * 100).astype(int)
         extra_fee_list = trade_cost_cal(amount_list, price_list,
                                         context.trade_cost)
@@ -202,6 +202,124 @@ class valid_Order(Order):
     @staticmethod
     def order_target_value(code, target_value, context):
         pass
+
+    @staticmethod
+    def position_clear(context):
+        table_stock = context.stock_account.table
+        session_stock = context.stock_account.session
+        results = session_stock.query(table_stock).all()
+        code = [result.code for result in results]
+        amount = [-result.tradable_amount for result in results]
+        current_date = context.current_date
+        historical_df = context.historical_data_df.copy()
+        historical_df['code'] = historical_df['code'].apply(lambda x: x[:6])
+        code_list, amount_list, price_list = get_available_list(
+            code, amount, historical_df, current_date)
+        if len(code_list) == 0:
+            print('选中股票市场上无数据，无法请求交易')
+            return
+        extra_fee_list = trade_cost_cal(amount_list, price_list,
+                                        context.trade_cost)
+        table_cash = context.cash_account.table
+        session_cash = context.cash_account.session
+        for code, amount, price, extra_fee in zip(code_list, amount_list,
+                                                  price_list, extra_fee_list):
+            buy_sell(amount, session_cash, session_stock, table_cash,
+                     table_stock, code, price, extra_fee, context)
+        print('能卖的全卖了，清仓')
+
+    @staticmethod
+    def position_adjust(context,
+                        portfolio='unchanged',
+                        percentage=1,
+                        method='equal weight'):
+        '''默认组合不变，只调整仓位，percentage=1则满仓(现金+stock_value),method: equal weight/equal value'''
+        table_stock = context.stock_account.table
+        session_stock = context.stock_account.session
+        table_cash = context.cash_account.table
+        session_cash = context.cash_account.session
+        historical_df = context.historical_data_df.copy()
+        historical_df['code'] = historical_df['code'].apply(lambda x: x[:6])
+
+        results = session_stock.query(table_stock).all()
+        code_in_account = [result.code for result in results]
+        df_result_account = historical_df[
+            (historical_df.date == context.current_date)
+            & (historical_df.code.isin(code_in_account))]
+        # 获取账户内可交易股票信息
+        code_in_account_available_list = df_result_account.code.values
+        price_in_account_available_list = df_result_account.price.values
+        if portfolio == 'unchanged':
+            portfolio_available_list = code_in_account_available_list
+            price_portfolio_available_list = price_in_account_available_list
+        else:
+            historical_df['code'] = historical_df['code'].apply(
+                lambda x: x[:6])
+            df_result_portfolio = historical_df[
+                (historical_df.date == context.current_date)
+                & (historical_df.code.isin(portfolio))]
+            # 获取换仓组合中可交易股票信息
+            portfolio_available_list = df_result_portfolio.code.values
+            price_portfolio_available_list = df_result_portfolio.price.values
+
+        code_sell_list = code_in_account_available_list[np.isin(
+            code_in_account_available_list,
+            portfolio_available_list,
+            invert=True)]
+        # 账户中不在换仓组合中的股票必卖出
+        sell_price_list = price_in_account_available_list[np.isin(
+            code_in_account_available_list,
+            portfolio_available_list,
+            invert=True)]
+        sell_target_amount_list = [0] * len(code_sell_list)
+
+        avai_cash_value = session_cash.query(table_cash).get(
+            'RMB').available_cash
+        avai_stock_value = sum([
+            session_stock.query(table_stock).get(code).current_price *
+            session_stock.query(table_stock).get(code).tradable_amount
+            for code in code_in_account_available_list
+        ])
+        total_value = float(avai_cash_value + avai_stock_value)
+        # 计算有效总仓位价值
+
+        if method == 'equal weight':
+            weight_list = np.ones(len(portfolio_available_list)) * 100
+        elif method == 'value weight':
+            pass
+        elif method == 'price weight':
+            weight_list = 100 * price_portfolio_available_list
+
+        portfolio_share = np.floor(
+            total_value * percentage /
+            (weight_list * price_portfolio_available_list).sum())
+        if portfolio_share == 0:
+            print('构建组合不足1份，换仓失败')
+            return
+        portfolio_amount_list = portfolio_share * weight_list
+        code_list = np.append(portfolio_available_list, code_sell_list)
+        price_list = np.append(price_in_account_available_list,
+                               sell_price_list)
+        target_amount_list = np.append(portfolio_amount_list,
+                                       sell_target_amount_list)
+        amount_list = np.array([
+            max(
+                target_amount_list[i] - session_stock.query(table_stock).get(
+                    code_list[i]).total_amount,
+                -session_stock.query(table_stock).get(
+                    code_list[i]).tradable_amount)
+            if session_stock.query(table_stock).get(code_list[i]) else
+            target_amount_list[i] for i in range(len(code_list))
+        ])
+        amount_list = (np.floor(amount_list / 100) * 100).astype(int)
+        extra_fee_list = trade_cost_cal(amount_list, price_list,
+                                        context.trade_cost)
+
+        buy_boolean_list = amount_list > 0
+        sell_boolean_list = amount_list < 0
+        trade_process(amount_list, price_list, code_list, extra_fee_list,
+                      buy_boolean_list, sell_boolean_list, session_cash,
+                      session_stock, table_cash, table_stock, context)
 
 
 class order_hub():
@@ -285,113 +403,3 @@ class order_hub():
                         {k: [self.canceled_order.get(k)] + [canceled_order]})
                 else:
                     self.canceled_order.update({k: canceled_order})
-
-
-def position_clear(context):
-    table_stock = context.stock_account.table
-    session_stock = context.stock_account.session
-    results = session_stock.query(table_stock).all()
-    code = [result.code for result in results]
-    amount = [-result.tradable_amount for result in results]
-    current_date = context.current_date
-    historical_df = context.historical_data_df.copy()
-    historical_df['code'] = historical_df['code'].apply(lambda x: x[:6])
-    code_list, amount_list, price_list = get_available_list(
-        code, amount, historical_df, current_date)
-    if len(code_list) == 0:
-        print('选中股票市场上无数据，无法请求交易')
-        return
-    extra_fee_list = trade_cost_cal(amount_list, price_list,
-                                    context.trade_cost)
-    table_cash = context.cash_account.table
-    session_cash = context.cash_account.session
-    for code, amount, price, extra_fee in zip(code_list, amount_list,
-                                              price_list, extra_fee_list):
-        buy_sell(amount, session_cash, session_stock, table_cash, table_stock,
-                 code, price, extra_fee, context)
-    print('能卖的全卖了，清仓')
-
-
-def position_adjust(context,
-                    portfolio='unchanged',
-                    percentage=1,
-                    method='equal weight'):
-    '''默认组合不变，只调整仓位，percentage=1则满仓(现金+stock_value),method: equal weight/equal value'''
-    table_stock = context.stock_account.table
-    session_stock = context.stock_account.session
-    table_cash = context.cash_account.table
-    session_cash = context.cash_account.session
-    historical_df = context.historical_data_df.copy()
-    historical_df['code'] = historical_df['code'].apply(lambda x: x[:6])
-
-    results = session_stock.query(table_stock).all()
-    code_in_account = [result.code for result in results]
-    df_result_account = historical_df[
-        (historical_df.date == context.current_date)
-        & (historical_df.code.isin(code_in_account))]
-    # 获取账户内可交易股票信息
-    code_in_account_available_list = df_result_account.code.values
-    price_in_account_available_list = df_result_account.price.values
-    if portfolio == 'unchanged':
-        portfolio_available_list = code_in_account_available_list
-        price_portfolio_available_list = price_in_account_available_list
-    else:
-        historical_df['code'] = historical_df['code'].apply(lambda x: x[:6])
-        df_result_portfolio = historical_df[
-            (historical_df.date == context.current_date)
-            & (historical_df.code.isin(portfolio))]
-        # 获取换仓组合中可交易股票信息
-        portfolio_available_list = df_result_portfolio.code.values
-        price_portfolio_available_list = df_result_portfolio.price.values
-
-    code_sell_list = code_in_account_available_list[np.isin(
-        code_in_account_available_list, portfolio_available_list, invert=True)]
-    # 账户中不在换仓组合中的股票必卖出
-    sell_price_list = price_in_account_available_list[np.isin(
-        code_in_account_available_list, portfolio_available_list, invert=True)]
-    sell_target_amount_list = [0] * len(code_sell_list)
-
-    avai_cash_value = session_cash.query(table_cash).get('RMB').available_cash
-    avai_stock_value = sum([
-        session_stock.query(table_stock).get(code).current_price *
-        session_stock.query(table_stock).get(code).tradable_amount
-        for code in code_in_account_available_list
-    ])
-    total_value = float(avai_cash_value + avai_stock_value)
-    # 计算有效总仓位价值
-
-    if method == 'equal weight':
-        weight_list = np.ones(len(portfolio_available_list)) * 100
-    elif method == 'value weight':
-        pass
-    elif method == 'price weight':
-        weight_list = 100 * price_portfolio_available_list
-
-    portfolio_share = np.floor(
-        total_value * percentage /
-        (weight_list * price_portfolio_available_list).sum())
-    if portfolio_share == 0:
-        print('构建组合不足1份，换仓失败')
-        return
-    portfolio_amount_list = portfolio_share * weight_list
-    code_list = np.append(portfolio_available_list, code_sell_list)
-    price_list = np.append(price_in_account_available_list, sell_price_list)
-    target_amount_list = np.append(portfolio_amount_list,
-                                   sell_target_amount_list)
-    amount_list = np.array([
-        max(
-            target_amount_list[i] -
-            session_stock.query(table_stock).get(code_list[i]).total_amount,
-            -session_stock.query(table_stock).get(code_list[i]).tradable_amount
-        ) if session_stock.query(table_stock).get(code_list[i]) else
-        target_amount_list[i] for i in range(len(code_list))
-    ])
-    amount_list = (np.floor(amount_list / 100) * 100).astype(int)
-    extra_fee_list = trade_cost_cal(amount_list, price_list,
-                                    context.trade_cost)
-
-    buy_boolean_list = amount_list > 0
-    sell_boolean_list = amount_list < 0
-    trade_process(amount_list, price_list, code_list, extra_fee_list,
-                  buy_boolean_list, sell_boolean_list, session_cash,
-                  session_stock, table_cash, table_stock, context)

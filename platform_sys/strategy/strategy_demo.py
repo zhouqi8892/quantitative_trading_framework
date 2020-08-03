@@ -1,5 +1,5 @@
 import pandas as pd
-from ..action.order import position_clear, position_adjust, Order
+from ..action.order import Order
 
 
 def before_market(context):

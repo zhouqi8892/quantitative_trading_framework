@@ -8,27 +8,6 @@ class order_cost(Enum):
     stamp_tax = 1
 
 
-def get_available_list(code, amount, historical_df, current_date):
-    '''用于判断待买卖股票是否在市场上有数据（可交易），
-    return code、amount、price去除不可买后的list'''
-    assert isinstance(
-        code, list) or type(code) is str, 'code shoule be str or list with str'
-    assert (isinstance(amount, list) and isinstance(amount[0], np.int32)
-            ) or type(amount) is int, 'amount should be int or list with int'
-    code_list = np.array(code if type(code) is list else [code])
-    amount_list = np.array(amount if type(amount) is list else [amount])
-    code_available_list = [
-        i if historical_df[(historical_df.date == current_date)
-                           & (historical_df.code == i)].shape[0] == 1 else None
-        for i in code_list
-    ]
-    df_result = historical_df[(historical_df.date == current_date)
-                              & (historical_df.code.isin(code_list))]
-    code_available_list = df_result.code.values
-    price_available_list = df_result.price.values
-    amount_available_list = amount_list[np.isin(code_list,
-                                                code_available_list)]
-    return code_available_list, amount_available_list, price_available_list
 
 
 def test_available_capital(amount_list, price_list, context):
