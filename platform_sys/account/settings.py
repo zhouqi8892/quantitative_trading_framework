@@ -17,6 +17,7 @@ db_url_dict = {
 
 def stock_account_linkage(session, table, code, amount, price, extra_fee,
                           context):
+    
     result = session.query(table).get(code)
     if result:  # 加仓/减仓
         result.current_price = price

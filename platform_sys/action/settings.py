@@ -20,19 +20,6 @@ def test_available_capital(amount_list, price_list, context):
         return False
 
 
-def trade_cost_cal(amount_list, price_list, trade_cost):
-    '''券商手续费双向收取，印花税卖出时收取，后期甄别'''
-    market_value_list = np.abs(amount_list) * price_list
-    brokerage_fee = np.maximum(
-        trade_cost[order_cost.brokerage_fee.name][0] * market_value_list,
-        trade_cost[order_cost.brokerage_fee.name][1])
-    market_value_list[amount_list > 0] = 0
-    market_value_list[amount_list < 0] = market_value_list[
-        amount_list < 0] * trade_cost[order_cost.stamp_tax.name]
-    stamp_tax = market_value_list
-    return np.round(brokerage_fee + stamp_tax, 2)
-
-
 def trade_process(amount_list, price_list, code_list, extra_fee_list,
                   buy_boolean_list, sell_boolean_list, session_cash,
                   session_stock, table_cash, table_stock, context):
@@ -112,7 +99,7 @@ def buy_sell(amount, session_cash, session_stock, table_cash, table_stock,
         before_buy_request(session_cash, table_cash, extra_fee, amount, price)
         if True:  # 查询返回成交成功
             cash_account_linkage(session_cash, table_cash, price, amount,
-                                 extra_fee)
+                                 extra_fee, context)
             stock_account_linkage(session_stock, table_stock, code, amount,
                                   price, extra_fee, context)
             print('buy %s %s' % (amount, code))
@@ -126,7 +113,7 @@ def buy_sell(amount, session_cash, session_stock, table_cash, table_stock,
             stock_account_linkage(session_stock, table_stock, code, amount,
                                   price, extra_fee, context)
             cash_account_linkage(session_cash, table_cash, price, amount,
-                                 extra_fee)
+                                 extra_fee, context)
             print('sell %s %s' % (-amount, code))
         else:
             print('卖出失败，须回滚')

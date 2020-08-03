@@ -1,7 +1,5 @@
 from .settings import trade_process, order_cost
-
 from ..data.data_process import historical_data_df
-from functools import partial
 import numpy as np
 import shelve
 
@@ -182,9 +180,10 @@ class dealt_Order(valid_Order):
         table_cash, session_cash = context.cash_account.table, context.cash_account.session
         buy_boolean_list = amount_list > 0
         sell_boolean_list = amount_list < 0
-        trade_process(amount_list, self.transaction_price, self.code, extra_fee_list,
-                      buy_boolean_list, sell_boolean_list, session_cash,
-                      session_stock, table_cash, table_stock, context)
+        trade_process(amount_list, self.transaction_price, self.code,
+                      extra_fee_list, buy_boolean_list, sell_boolean_list,
+                      session_cash, session_stock, table_cash, table_stock,
+                      context)
 
     @staticmethod
     def order_target(code, target_amount, context):
