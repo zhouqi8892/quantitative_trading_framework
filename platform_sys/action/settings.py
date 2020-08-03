@@ -8,8 +8,6 @@ class order_cost(Enum):
     stamp_tax = 1
 
 
-
-
 def test_available_capital(amount_list, price_list, context):
     market_value_list = amount_list * price_list
     extra_fee_list = trade_cost_cal(amount_list, price_list,

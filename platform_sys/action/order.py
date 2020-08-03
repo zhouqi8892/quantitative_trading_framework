@@ -1,4 +1,5 @@
-from .settings import get_available_list, trade_process, trade_cost_cal
+from .settings import trade_process, order_cost
+
 from ..data.data_process import historical_data_df
 from functools import partial
 import numpy as np
@@ -104,6 +105,11 @@ class Order:
                for k in self.kwargs_keys})(self.order_establish_time)
         return valid_order, invalid_order
 
+
+class valid_Order(Order):
+    def __init__(self, code, order_type, **kwargs):
+        super().__init__(code=code, order_type=order_type, **kwargs)
+
     def order_match(self, match_time
                     ) -> '(valid_order, dealt_order, canceled_order)':
 
@@ -114,8 +120,11 @@ class Order:
 
         elif self.order_type == 'mkt':
             # assume all stocks in this order will deal, no need to split
-            valid_order, dealt_order, canceled_order = None, self.dealt_order(
-                match_time), None
+            # 未用split 故没有boolean，可以统一用boolean(all True) split的形式
+            valid_order, dealt_order, canceled_order = None, dealt_Order(
+                self.code, self.order_type, match_time,
+                **{k: getattr(self, k)
+                   for k in self.kwargs_keys}), None
 
         elif self.order_type == 'lmt':
             # 目前未考虑分批成交，若lmt必然会分批成交，届时需将订单拆分同order_plit操作
@@ -124,43 +133,56 @@ class Order:
             pass
         return valid_order, dealt_order, canceled_order
 
-    def dealt_order(self, cur_time):
-        '''add information for dealt order. e.g., dealt price, commission fee, dealt time'''
-        self.order_dealt_time = cur_time
-        # !!!should consider slippage!!!
-        if self.order_type == 'mkt':
-            tmp_price_list = []
-            for code in self.code:
-                tmp_price_list += [historical_data_df.query(
-                    'code == @code and date == @cur_time')['price'].iloc[0]]
-            self.price = np.array(tmp_price_list)
-        return self
-
     def canceled_order(self, cur_time):
         '''add information for dealt order. e.g., canceled time'''
         setattr(self, 'order_canceled_time', cur_time)
 
 
-class valid_Order(Order):
-    def __init__(self, code, order_type, **kwargs):
+class dealt_Order(valid_Order):
+    def __init__(self, code, order_type, order_dealt_time, **kwargs):
         super().__init__(code=code, order_type=order_type, **kwargs)
+        self.order_dealt_time = order_dealt_time
+        self.transaction_price = self.transaction_price_cal()
         ORDER_METHOD = dict(amount=self.order,
                             target_amount=self.order_target,
                             value=self.order_value,
                             target_value=self.order_target_value)
         self.METHOD_chosen = ORDER_METHOD[self.TYPE_chosen]
 
+    def transaction_price_cal(self):
+        # !!!should consider slippage!!!
+        order_dealt_time = self.order_dealt_time
+        if self.order_type == 'mkt':
+            tmp_price_list = []
+            for code in self.code:
+                tmp_price_list += [
+                    historical_data_df.query(
+                        'code == @code and date == @order_dealt_time')
+                    ['price'].iloc[0]
+                ]
+            return np.array(tmp_price_list)
+
+    def trade_cost(self, amount, trade_cost):
+        '''券商手续费双向收取，印花税卖出时收取，后期甄别'''
+        market_value_list = np.abs(amount) * self.transaction_price
+        brokerage_fee = np.maximum(
+            trade_cost[order_cost.brokerage_fee.name][0] * market_value_list,
+            trade_cost[order_cost.brokerage_fee.name][1])
+        market_value_list[self.amount > 0] = 0
+        market_value_list[self.amount < 0] = market_value_list[
+            self.amount < 0] * trade_cost[order_cost.stamp_tax.name]
+        stamp_tax = market_value_list
+        self.extra_fee = np.round(brokerage_fee + stamp_tax, 2)
+        return self.extra_fee
+
     def order(self, context):
-        code_list, amount_list, price_list = self.code, self.amount, self.price
-        amount_list = (np.floor(amount_list / 100) * 100).astype(int)
-        extra_fee_list = trade_cost_cal(amount_list, price_list,
-                                        context.trade_cost)
-        # 判断是否可交易，返回有效股票代码（市场有数据）
+        amount_list = (np.floor(self.amount / 100) * 100).astype(int)
+        extra_fee_list = self.trade_cost(amount_list, context.trade_cost)
         table_stock, session_stock = context.stock_account.table, context.stock_account.session
         table_cash, session_cash = context.cash_account.table, context.cash_account.session
         buy_boolean_list = amount_list > 0
         sell_boolean_list = amount_list < 0
-        trade_process(amount_list, price_list, code_list, extra_fee_list,
+        trade_process(amount_list, self.transaction_price, self.code, extra_fee_list,
                       buy_boolean_list, sell_boolean_list, session_cash,
                       session_stock, table_cash, table_stock, context)
 
