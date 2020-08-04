@@ -2,7 +2,7 @@ from platform_sys.account import account_init
 from platform_sys.account.cash import cash_account
 from platform_sys.account.stock import stock_account
 from platform_sys.account.settings import close_market_adjust, open_market_adjust
-from platform_sys.action.order import order_hub
+from platform_sys.packages.order_hub import order_hub
 from platform_sys.data.data_prepare import market_data_df, trading_date_df
 from platform_sys import strategy
 import pandas as pd

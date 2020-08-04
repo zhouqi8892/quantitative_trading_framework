@@ -1,7 +1,9 @@
 from platform_sys.action.settings import trade_process, order_cost
 from platform_sys.data.data_prepare import market_data_df
 from platform_sys.account.settings import account_linkage
+from platform_sys.positions.weight import weight_fun_dict
 import numpy as np
+import pandas as pd
 import shelve
 import inspect
 import json
@@ -187,12 +189,18 @@ class dealt_Order(valid_Order):
                             target_value=self.order_target_value)
         self.METHOD_chosen = ORDER_METHOD[self.TYPE_chosen]
 
-    def transaction_price_cal(self):
+    def transaction_price_cal(self, *args):
+
+        if args:
+            code_list, = args
+        else:
+            code_list = self.code
+
         # !!!should consider slippage!!!
         order_dealt_time = self.order_dealt_time
         if self.order_type == 'mkt':
             tmp_price_list = []
-            for code in self.code:
+            for code in code_list:
                 tmp_price_list += [
                     market_data_df.query(
                         'code == @code and time == @order_dealt_time')
@@ -200,17 +208,22 @@ class dealt_Order(valid_Order):
                 ]
             return np.array(tmp_price_list)
 
-    def trade_cost(self):
+    def trade_cost(self, *args):
         '''券商手续费双向收取，印花税卖出时收取，后期甄别'''
+        if args:
+            amount, transaction_price = args
+        else:
+            amount, transaction_price = self.amount, self.transaction_price
+
         trade_cost_dict = transaction_settings[self.product]
-        market_value_list = np.abs(self.amount) * self.transaction_price
+        market_value_list = np.abs(amount) * transaction_price
         brokerage_fee = np.maximum(
             trade_cost_dict[order_cost.brokerage_fee.name][0] *
             market_value_list,
             trade_cost_dict[order_cost.brokerage_fee.name][1])
-        market_value_list[self.amount > 0] = 0
-        market_value_list[self.amount < 0] = market_value_list[
-            self.amount < 0] * trade_cost_dict[order_cost.stamp_tax.name]
+        market_value_list[amount > 0] = 0
+        market_value_list[amount < 0] = market_value_list[
+            amount < 0] * trade_cost_dict[order_cost.stamp_tax.name]
         stamp_tax = market_value_list
         transaction_cost = (brokerage_fee + stamp_tax).round(2)
         return transaction_cost
@@ -229,10 +242,14 @@ class dealt_Order(valid_Order):
             # 返回new dealt obejct, new canceled order
             return False
 
-    def trade_process(self, amount_list, context):
+    def trade_process(self, amount_list, context, *args):
+        # 考虑添加 transaction_amount 实际成交数量至self
+        if args:
+            price_list, code_list, extra_fee_list = args
+        else:
+            price_list, code_list, extra_fee_list = self.transaction_price, self.code, self.transaction_cost
 
         buy_boolean_list = amount_list > 0
-        price_list, code_list, extra_fee_list = self.transaction_price, self.code, self.transaction_cost
         # sell first
         for code, amount, price, extra_fee in zip(
                 code_list[~buy_boolean_list], amount_list[~buy_boolean_list],
@@ -272,7 +289,7 @@ class dealt_Order(valid_Order):
 
     def order(self, context):
         amount_list = (np.floor(self.amount / 100) * 100).astype(int)
-        self.trade_process(amount_list,context)
+        self.trade_process(amount_list, context)
 
     def order_target(self, context):
         code_list, target_amount_list = self.code, self.target_amount
@@ -288,12 +305,7 @@ class dealt_Order(valid_Order):
             target_amount_list[i] for i in range(len(code_list))
         ])
         amount_list = (np.floor(amount_list / 100) * 100).astype(int)
-        extra_fee_list = self.trade_cost(amount_list, context.trade_cost)
-        buy_boolean_list = amount_list > 0
-        sell_boolean_list = amount_list < 0
-        trade_process(amount_list, self.transaction_price, self.code,
-                      extra_fee_list, buy_boolean_list, sell_boolean_list,
-                      context)
+        self.trade_process(amount_list, context)
 
     @staticmethod
     def order_value(code, value, context):
@@ -303,30 +315,14 @@ class dealt_Order(valid_Order):
     def order_target_value(code, target_value, context):
         pass
 
-    @staticmethod
-    def position_clear(context):
+    def position_clear(self, context):
         table_stock = context.stock_account.table
         session_stock = context.stock_account.session
         results = session_stock.query(table_stock).all()
         code = [result.code for result in results]
-        amount = [-result.tradable_amount for result in results]
-        current_date = context.current_date
-        historical_df = context.historical_data_df.copy()
-        historical_df['code'] = historical_df['code'].apply(lambda x: x[:6])
-        code_list, amount_list, price_list = get_available_list(
-            code, amount, historical_df, current_date)
-        if len(code_list) == 0:
-            print('选中股票市场上无数据，无法请求交易')
-            return
-        extra_fee_list = trade_cost_cal(amount_list, price_list,
-                                        context.trade_cost)
-        table_cash = context.cash_account.table
-        session_cash = context.cash_account.session
-        for code, amount, price, extra_fee in zip(code_list, amount_list,
-                                                  price_list, extra_fee_list):
-            buy_sell(amount, session_cash, session_stock, table_cash,
-                     table_stock, code, price, extra_fee, context)
-        print('能卖的全卖了，清仓')
+        amount_list = [-result.tradable_amount for result in results]
+        # 上述查询放在Order init内进行
+        self.trade_process(amount_list, context)
 
     @staticmethod
     def position_target(context,
@@ -334,172 +330,60 @@ class dealt_Order(valid_Order):
                         position_target=1,
                         method='equal weight'):
         '''默认组合不变，只调整仓位，percentage=1则满仓(现金+stock_value),method: equal weight/equal value'''
-        # 考虑amount在实例Order内就生成
+        pass
+
+    def position_target(self, portfolio_list, percentage, method, context):
+        '''调仓函数'''
         table_stock = context.stock_account.table
         session_stock = context.stock_account.session
-        table_cash = context.cash_account.table
-        session_cash = context.cash_account.session
-        historical_df = context.historical_data_df.copy()
-        historical_df['code'] = historical_df['code'].apply(lambda x: x[:6])
-
         results = session_stock.query(table_stock).all()
-        code_in_account = [result.code for result in results]
-        df_result_account = historical_df[
-            (historical_df.time == context.current_date)
-            & (historical_df.code.isin(code_in_account))]
-        # 获取账户内可交易股票信息
-        code_in_account_available_list = df_result_account.code.values
-        price_in_account_available_list = df_result_account.price.values
-        if code == 'unchanged':
-            portfolio_available_list = code_in_account_available_list
-            price_portfolio_available_list = price_in_account_available_list
-        else:
-            historical_df['code'] = historical_df['code'].apply(
-                lambda x: x[:6])
-            df_result_portfolio = historical_df[
-                (historical_df.time == context.current_date)
-                & (historical_df.code.isin(code))]
-            # 获取换仓组合中可交易股票信息
-            portfolio_available_list = df_result_portfolio.code.values
-            price_portfolio_available_list = df_result_portfolio.price.values
+        total_amount_list = [result.total_amount for result in results]
+        stock_in_account = np.array([result.code for result in results])
+        stock_union_set = set(stock_in_account) | set(portfolio_list)
+        stock_amount_df = pd.DataFrame(0,
+                                       index=stock_union_set,
+                                       columns=['account_amount'])
+        stock_amount_df.account_amount.update(
+            pd.Series(total_amount_list, index=stock_in_account))
 
-        code_sell_list = code_in_account_available_list[np.isin(
-            code_in_account_available_list,
-            portfolio_available_list,
-            invert=True)]
-        # 账户中不在换仓组合中的股票必卖出
-        sell_price_list = price_in_account_available_list[np.isin(
-            code_in_account_available_list,
-            portfolio_available_list,
-            invert=True)]
-        sell_target_amount_list = [0] * len(code_sell_list)
+        # stocks in account but not in target_list are to be sold out
+        clear_stock_list = stock_in_account[
+            ~np.isin(stock_in_account, portfolio_list)]
+        stock_amount_df['target_amount'] = pd.Series(0, index=clear_stock_list)
 
-        avai_cash_value = session_cash.query(table_cash).get(
-            'RMB').available_cash
-        avai_stock_value = sum([
-            session_stock.query(table_stock).get(code).current_price *
-            session_stock.query(table_stock).get(code).tradable_amount
-            for code in code_in_account_available_list
-        ])
-        total_value = float(avai_cash_value + avai_stock_value)
-        # 计算有效总仓位价值
+        # if target_list and account_list not overlap completely, some are exposed to sell
+        # sell them first to update total_avai_value in cash account
+        if clear_stock_list.size != 0:
+            stock_amount_df.query('target_amount == 0')
+            price_list = self.transaction_price_cal(*(clear_stock_list, ))
+            amount_list = np.zeros(clear_stock_list.size).astype(int)
+            extra_fee_list = self.trade_cost(*(amount_list, price_list))
+            self.trade_process(amount_list, context,
+                               *(price_list, clear_stock_list, extra_fee_list))
 
-        if method == 'equal weight':
-            weight_list = np.ones(len(portfolio_available_list)) * 100
-        elif method == 'value weight':
-            pass
-        elif method == 'price weight':
-            weight_list = 100 * price_portfolio_available_list
+        # some stocks are to be bounght or positions are to be adjusted if in account already
+        if len(portfolio_list) != 0:
+            # 直接赋值，早先卖出的非组合账户内股票部分成nan，后续只针对target_list部分
+            stock_amount_df.target_amount = pd.Series(weight_fun_dict[method](
+                portfolio_list, percentage, context),
+                                                      index=portfolio_list)
 
-        portfolio_share = np.floor(
-            total_value * position_target /
-            (weight_list * price_portfolio_available_list).sum())
-        if portfolio_share == 0:
-            print('构建组合不足1份，换仓失败')
-            return
-        portfolio_amount_list = portfolio_share * weight_list
-        code_list = np.append(portfolio_available_list, code_sell_list)
-        price_list = np.append(price_in_account_available_list,
-                               sell_price_list)
-        target_amount_list = np.append(portfolio_amount_list,
-                                       sell_target_amount_list)
-        amount_list = np.array([
-            max(
-                target_amount_list[i] - session_stock.query(table_stock).get(
-                    code_list[i]).total_amount,
-                -session_stock.query(table_stock).get(
-                    code_list[i]).tradable_amount)
-            if session_stock.query(table_stock).get(code_list[i]) else
-            target_amount_list[i] for i in range(len(code_list))
-        ])
-        amount_list = (np.floor(amount_list / 100) * 100).astype(int)
-        extra_fee_list = trade_cost_cal(amount_list, price_list,
-                                        context.trade_cost)
+            # 判断组合权重是否构建成功，不成功返回[np.nan...]
+            if not all(stock_amount_df.target_amount.isnull()):
+                stock_amount_df[
+                    'diff'] = stock_amount_df.target_amount - stock_amount_df.account_amount
+                # 下单按非整份数，实际交易份数又内部函数规则确定
+                stock_amount_df['diff'] = stock_amount_df['diff'].apply(
+                    lambda x: 0 if np.abs(x) < 100 else x)
 
-        buy_boolean_list = amount_list > 0
-        sell_boolean_list = amount_list < 0
-        trade_process(amount_list, price_list, code_list, extra_fee_list,
-                      buy_boolean_list, sell_boolean_list, session_cash,
-                      session_stock, table_cash, table_stock, context)
+                price_list = self.transaction_price_cal(*(portfolio_list, ))
+                amount_list = stock_amount_df.loc[portfolio_list,
+                                                  'diff'].to_numpy()
+                extra_fee_list = self.trade_cost(*(amount_list, price_list))
+                self.trade_process(
+                    amount_list, context,
+                    *(price_list, portfolio_list, extra_fee_list))
 
 
-class order_hub():
-    def __init__(self):
-
-        self.valid_order = {}
-        self.invalid_order = {}
-
-        self.canceled_order = {}
-        self.dealt_order = {}
-        self.latest_order_idx = 0
-
-    def __call__(self, order_shelve, context):
-        '''check if new order comes and do match_process for valid order'''
-
-        # at each loop time, check if new order comes
-        # if come with new, classify new comer into valid/invalid order(validate_process)
-        if int(order_shelve['0']) > self.latest_order_idx:
-
-            # e.g., latest_order_idx=0, order_shelve['0']=2--> diff=2(last two are new comer [-2:])
-            diff = int(order_shelve['0']) - self.latest_order_idx
-
-            # record current_time as order_establish_time
-            new_orders = {
-                k: v(context.current_time)
-                for k, v in list(order_shelve.items())[-diff:]
-            }
-
-            self.validate_process(new_orders)
-
-            # update latest_order_idx for next judgement
-            self.latest_order_idx = int(order_shelve['0'])
-
-        # match_process conducts at each loop time
-        self.match_process(context)
-
-    def validate_process(self, new_orders):
-        '''classify new orders to valid_order/invalid_order'''
-        for k, v in new_orders.items():
-            valid_orders, invalid_orders = v.order_validity()
-            if len(valid_orders.code) != 0:
-                self.valid_order.update({k: valid_orders})
-            if len(invalid_orders.code) != 0:
-                self.invalid_order.update({k: invalid_orders})
-
-    def match_process(self, context):
-        '''match valid_order at each loop time,
-        once matched, move to dealt_order and synchronize relevant account
-        once expiry, move to canceled_order'''
-
-        # 'copy' original items to avoid error caused by dict change(update valid_order)
-        valid_order_items = list(self.valid_order.items())
-
-        for k, v in valid_order_items:
-            valid_order, dealt_order, canceled_order = v.order_match(context)
-
-            # update dict if valid_order is not None, else delete
-            if valid_order:
-                self.valid_order.update({k: valid_order})
-            else:
-                del self.valid_order[k]
-
-            if dealt_order:
-                if self.dealt_order.get(k):
-                    # already exist, cannot overwrite directly
-                    # this case happens when the order was partly dealt previously
-                    self.dealt_order.update(
-                        {k: [self.dealt_order.get(k)] + [dealt_order]})
-                else:
-                    self.dealt_order.update({k: dealt_order})
-
-                # synchronize relevant account
-                dealt_order.METHOD_chosen(context)
-
-            if canceled_order:
-                if self.canceled_order.get(k):
-                    # already exist, cannot overwrite directly
-                    # this case happens when the order was partly canceled previously
-                    self.canceled_order.update(
-                        {k: [self.canceled_order.get(k)] + [canceled_order]})
-                else:
-                    self.canceled_order.update({k: canceled_order})
+class canceled_Order(valid_Order):
+    pass
