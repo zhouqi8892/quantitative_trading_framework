@@ -1,6 +1,7 @@
 .vscode
-data/
-__pycache__/
+data
+__pycache__
 order.bak
 order.dat
 order.dir
+tempCodeRunnerFile.py

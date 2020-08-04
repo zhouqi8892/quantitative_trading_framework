@@ -147,3 +147,98 @@ def open_market_adjust(context):
             # 新买入份额不计入tradable_amount, 当日结束后该份额移入tradable
             result_stock.tradable_amount += result_stock.today_buy_amount
         result_stock.today_buy_amount += -result_stock.today_buy_amount
+
+
+class account_linkage:
+    def __init__(self, code, amount, price, extra_fee):
+        self.code = code
+        self.amount = amount
+        self.price = price
+        self.extra_fee = extra_fee
+
+    def stock_account_linkage(self, context):
+        code, amount, price, extra_fee = self.code, self.amount, self.price, self.extra_fee
+        table, session = context.stock_account.table, context.stock_account.session
+        result = session.query(table).get(code)
+        if result:  # 加仓/减仓
+            result.current_price = price
+            total_cost = Decimal(price * amount + extra_fee)
+            amount = amount.astype(Decimal)
+            result.acc_avg_cost = (
+                (result.acc_avg_cost * result.total_amount + total_cost) /
+                (result.total_amount +
+                 amount)) if result.total_amount + amount != 0 else 0
+            if amount > 0:
+                result.avg_cost = (result.avg_cost * result.total_amount +
+                                   total_cost) / (result.total_amount + amount)
+                result.today_buy_amount += amount
+            result.transaction_time = context.current_time
+            if amount < 0:
+                #挂单时locked_amount增加，现在减回去
+                result.locked_amount += amount
+            result.total_amount += amount
+            result.market_value = price * result.total_amount
+            result.transaction_time = context.current_time
+
+        else:  # 建仓
+            stock_add = table(code=code,
+                              current_price=price,
+                              market_value=price * amount,
+                              acc_avg_cost=(price * amount + extra_fee) /
+                              amount,
+                              avg_cost=(price * amount + extra_fee) / amount,
+                              init_time=context.current_time,
+                              transaction_time=context.current_time,
+                              locked_amount=0,
+                              total_amount=amount,
+                              tradable_amount=0,
+                              today_buy_amount=amount,
+                              side='long')
+            session.add(stock_add)
+        session.commit()
+        context.stock_account.table = table
+        context.stock_account.session = session
+        session.close()
+
+    def cash_account_linkage(self, context):
+        price, amount, extra_fee = self.price, self.amount, self.extra_fee
+        table, session = context.cash_account.table, context.cash_account.session
+        result = session.query(table).get('RMB')
+        total_cost = Decimal(amount * price + extra_fee)
+        result.today_inout += -total_cost
+        result.inout_cash += -total_cost
+        if amount > 0:
+            result.locked_cash += -total_cost
+        if amount < 0:
+            result.available_cash += -total_cost
+        session.commit()
+        context.cash_account.table = table
+        context.cash_account.session = session
+        session.close()
+
+    def before_buy_request(self, context):
+        price, amount, extra_fee = self.price, self.amount, self.extra_fee
+        table, session = context.cash_account.table, context.cash_account.session
+        result = session.query(table).get('RMB')
+        total_cost = Decimal(amount * price + extra_fee)
+        result.available_cash += -total_cost
+        result.transferable_cash += -total_cost
+        result.locked_cash += total_cost
+        session.commit()
+
+    def before_sell_request(self, context):
+        code, amount = self.code, self.amount
+        table, session = context.stock_account.table, context.stock_account.session
+        result = session.query(table).get(code)
+        if result:
+            if abs(amount) > result.tradable_amount:
+                # 请求卖出的数量上限
+                amount = -result.tradable_amount
+            result.tradable_amount += amount
+            result.locked_amount += -amount
+            # session_stock.commit()
+            return True
+        else:
+            print(' %s not in account' % code)
+            return False
+        session.commit()

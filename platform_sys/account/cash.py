@@ -1,6 +1,6 @@
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
-from .model import cash_account_fun
+from platform_sys.account.model import cash_account_fun
 from sqlalchemy import create_engine
 import pandas as pd
 import json

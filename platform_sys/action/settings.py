@@ -1,6 +1,6 @@
 from enum import Enum
 import numpy as np
-from ..account.settings import stock_account_linkage, cash_account_linkage, before_buy_request, before_sell_request
+from platform_sys.account.settings import stock_account_linkage, cash_account_linkage, before_buy_request, before_sell_request
 
 
 class order_cost(Enum):
@@ -8,6 +8,7 @@ class order_cost(Enum):
     stamp_tax = 1
 
 
+# 待position_target适配后可删除
 def test_available_capital(amount_list, price_list, extra_fee_list, context):
     market_value_list = amount_list * price_list
     total_cost = np.sum(market_value_list + extra_fee_list)
@@ -18,72 +19,24 @@ def test_available_capital(amount_list, price_list, extra_fee_list, context):
         return False
 
 
+# 待position_target适配后可删除
+def trade_process(amount_list, price_list, code_list, extra_fee_list, context):
 
-def trade_process(amount_list, price_list, code_list, extra_fee_list,
-                  buy_boolean_list, sell_boolean_list, context):
-    if len(amount_list[buy_boolean_list]) > 0 and len(
-            amount_list[sell_boolean_list]) == 0:
-        #只有买单请求
-        test_result = test_available_capital(amount_list[buy_boolean_list],
-                                             price_list[buy_boolean_list],
-                                             extra_fee_list[buy_boolean_list],
-                                             context)
-        if test_result:
-            for code, amount, price, extra_fee in zip(
-                    code_list[buy_boolean_list], amount_list[buy_boolean_list],
-                    price_list[buy_boolean_list],
-                    extra_fee_list[buy_boolean_list]):
-                buy_sell(amount, code, price, extra_fee, context)
-        else:
-            print('资金不够无法购买')
-    elif len(amount_list[buy_boolean_list]) == 0 and len(
-            amount_list[sell_boolean_list]) > 0:
-        #只有卖单请求
-        for code, amount, price, extra_fee in zip(
-                code_list[sell_boolean_list], amount_list[sell_boolean_list],
-                price_list[sell_boolean_list],
-                extra_fee_list[sell_boolean_list]):
-            buy_sell(amount, code, price, extra_fee, context)
-    elif len(amount_list[buy_boolean_list]) > 0 and len(
-            amount_list[sell_boolean_list]) > 0:
-        # 既有买单又有卖单请求
-        test_result = test_available_capital(amount_list[buy_boolean_list],
-                                             price_list[buy_boolean_list],
-                                             context)
-        if test_result:  # 检验资金量是否支持直接买
-            for code, amount, price, extra_fee in zip(
-                    code_list[buy_boolean_list], amount_list[buy_boolean_list],
-                    price_list[buy_boolean_list],
-                    extra_fee_list[buy_boolean_list]):
-                buy_sell(amount, code, price, extra_fee, context)
-            for code, amount, price, extra_fee in zip(
-                    code_list[sell_boolean_list],
-                    amount_list[sell_boolean_list],
-                    price_list[sell_boolean_list],
-                    extra_fee_list[sell_boolean_list]):
-                buy_sell(amount, code, price, extra_fee, context)
-        else:  # 不支持则先卖后检验能否买
-            print('资金不足，尝试先卖后买')
-            for code, amount, price, extra_fee in zip(
-                    code_list[sell_boolean_list],
-                    amount_list[sell_boolean_list],
-                    price_list[sell_boolean_list],
-                    extra_fee_list[sell_boolean_list]):
-                buy_sell(amount, code, price, extra_fee, context)
-            test_result = test_available_capital(amount_list[buy_boolean_list],
-                                                 price_list[buy_boolean_list],
-                                                 context)
-            if test_result:
-                for code, amount, price, extra_fee in zip(
-                        code_list[buy_boolean_list],
-                        amount_list[buy_boolean_list],
-                        price_list[buy_boolean_list],
-                        extra_fee_list[buy_boolean_list]):
-                    buy_sell(amount, code, price, extra_fee, context)
-            else:
-                print('先卖后买也失败，资金不足')
+    buy_boolean_list = amount_list > 0
+
+    # sell first
+    for code, amount, price, extra_fee in zip(
+            code_list[~buy_boolean_list], amount_list[~buy_boolean_list],
+            price_list[~buy_boolean_list], extra_fee_list[~buy_boolean_list]):
+        buy_sell(amount, code, price, extra_fee, context)
+
+    for code, amount, price, extra_fee in zip(
+            code_list[buy_boolean_list], amount_list[buy_boolean_list],
+            price_list[buy_boolean_list], extra_fee_list[buy_boolean_list]):
+        buy_sell(amount, code, price, extra_fee, context)
 
 
+# 待position_target适配后可删除
 def buy_sell(amount, code, price, extra_fee, context):
     if amount > 0:
         # request buy，inout_cash unchanged, avai_cash down, trans_cash down, locked_cash up

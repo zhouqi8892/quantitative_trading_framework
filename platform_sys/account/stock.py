@@ -1,12 +1,13 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
-from .model import stock_account_fun
-from .settings import account
+from platform_sys.account.model import stock_account_fun
+from platform_sys.account.settings import account
 import pandas as pd
 import json
 with open('./platform_sys/settings/DB_url_settings.json', 'r') as f:
     db_url_dict = json.load(f)
+
 
 class stock_account:
     '''实例化实现多账户管理,
