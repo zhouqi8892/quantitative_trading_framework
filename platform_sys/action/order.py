@@ -1,7 +1,8 @@
 from .settings import trade_process, order_cost
-from ..data.data_process import historical_data_df
+from ..data.data_prepare import market_data_df
 import numpy as np
 import shelve
+import inspect
 
 # flag='n': initialize new blank shelve to store order
 with shelve.open(r'.\platform_sys\settings\order', flag='n') as order_shelve:
@@ -11,11 +12,12 @@ with shelve.open(r'.\platform_sys\settings\order', flag='n') as order_shelve:
 class Order:
     '''integrated order command'''
 
-    ORDER_TYPE = ['amount', 'target_amount', 'value', 'target_value']
-
+    ORDER_TYPE = [
+        'amount', 'target_amount', 'value', 'target_value', 'position_target'
+    ]
     __slots__ = [
-        'code', 'order_type', 'price', 'type_chosen', 'kwargs_keys',
-        'order_dealt_time', 'order_establish_time', 'TYPE_chosen'
+        'code', 'order_type', 'quote_price', 'order_establish_time',
+        'TYPE_chosen', 'method'
     ] + ORDER_TYPE
 
     def __init__(self, code, order_type='mkt', **kwargs):
@@ -30,12 +32,11 @@ class Order:
             self.TYPE_chosen = np.array(list(
                 kwargs.keys()))[ORDER_TYPE_test_boolean][0]
 
-        # validate combination of order_type and price
-        if (order_type == 'mkt' and 'price' in kwargs.keys()) or (
-                order_type == 'lmt' and 'price' not in kwargs.keys()):
-            raise Exception(
-                '[Order] indicate order_type="lmt" with price, else order_type="mkt"(by default) without price'
-            )
+        # confirm limit/market order_type
+        if 'quote_price' in kwargs.keys():
+            self.order_type = 'lmt'
+        else:
+            self.order_type = 'mkt'
 
         len_test_list = []
         # kwargs should only contain one of ORDER_TYPE and price if order_type='lmt'
@@ -51,7 +52,6 @@ class Order:
             [code]) if not isinstance(code,
                                       (list, np.ndarray)) else np.array(code)
         self.order_type = order_type
-        self.kwargs_keys = list(kwargs.keys())
 
         # test for length of each input list
         if len(set(len_test_list + [len(self.code)])) != 1:
@@ -60,7 +60,7 @@ class Order:
         with shelve.open(r'.\platform_sys\settings\order',
                          flag='c') as order_shelve:
             # append orders to shelve
-            key = str(max([int(k) for k in order_shelve.keys()]) + 1)
+            key = str(int(list(order_shelve.keys())[-1]) + 1)
             order_shelve[key] = self
             order_shelve['0'] += 1
 
@@ -79,8 +79,8 @@ class Order:
         order_establish_time = self.order_establish_time
         tmp_list = []
         for code in self.code:
-            if historical_data_df.query(
-                    'code == @code & date ==@order_establish_time').size != 0:
+            if market_data_df.query(
+                    'code == @code & time ==@order_establish_time').size != 0:
                 tmp_list += [True]
             else:
                 tmp_list += [False]
@@ -93,20 +93,36 @@ class Order:
         '''split into two Order object with valid and invalid orders'''
         # two new object
         # 尝试精简化用于valid/invalid和valid/dealt/cancel剥离
-        valid_order = valid_Order(
-            self.code[boolean_array], self.order_type,
-            **{k: getattr(self, k)[boolean_array]
-               for k in self.kwargs_keys})(self.order_establish_time)
-        invalid_order = self.__class__(
-            self.code[~boolean_array], self.order_type,
-            **{k: getattr(self, k)[~boolean_array]
-               for k in self.kwargs_keys})(self.order_establish_time)
+        valid_order = valid_Order(self, boolean_array)
+        invalid_order = invalid_Order(self, ~boolean_array)
         return valid_order, invalid_order
+
+    def instance_attr(self):
+        '''return self defined attributes'''
+        instance_attr = inspect.getmembers(
+            self, lambda x: not (inspect.isroutine(x)))
+        return [
+            attr for attr in instance_attr
+            if not (attr[0].startswith('__') and attr[0].endswith('__'))
+        ]
+
+
+class invalid_Order(Order):
+    def __init__(self, parent_self, boolean_array):
+        parent_instance_attr = parent_self.instance_attr()
+        for k, v in parent_instance_attr:
+            setattr(
+                self, k, v[boolean_array] if isinstance(v, np.ndarray)
+                and len(boolean_array) == len(v) else v)
 
 
 class valid_Order(Order):
-    def __init__(self, code, order_type, **kwargs):
-        super().__init__(code=code, order_type=order_type, **kwargs)
+    def __init__(self, parent_self, boolean_array):
+        parent_instance_attr = parent_self.instance_attr()
+        for k, v in parent_instance_attr:
+            setattr(
+                self, k, v[boolean_array] if isinstance(v, np.ndarray)
+                and len(boolean_array) == len(v) else v)
 
     def order_match(self, match_time
                     ) -> '(valid_order, dealt_order, canceled_order)':
@@ -120,9 +136,7 @@ class valid_Order(Order):
             # assume all stocks in this order will deal, no need to split
             # 未用split 故没有boolean，可以统一用boolean(all True) split的形式
             valid_order, dealt_order, canceled_order = None, dealt_Order(
-                self.code, self.order_type, match_time,
-                **{k: getattr(self, k)
-                   for k in self.kwargs_keys}), None
+                self, match_time), None
 
         elif self.order_type == 'lmt':
             # 目前未考虑分批成交，若lmt必然会分批成交，届时需将订单拆分同order_plit操作
@@ -137,8 +151,16 @@ class valid_Order(Order):
 
 
 class dealt_Order(valid_Order):
-    def __init__(self, code, order_type, order_dealt_time, **kwargs):
-        super().__init__(code=code, order_type=order_type, **kwargs)
+    def __init__(self, parent_self, order_dealt_time):
+        parent_instance_attr = parent_self.instance_attr()
+
+        boolean_array = []  # 备用，后续加入split后改
+
+        for k, v in parent_instance_attr:
+            setattr(
+                self, k, v[boolean_array] if isinstance(v, np.ndarray)
+                and len(boolean_array) == len(v) else v)
+
         self.order_dealt_time = order_dealt_time
         self.transaction_price = self.transaction_price_cal()
         ORDER_METHOD = dict(amount=self.order,
@@ -154,9 +176,9 @@ class dealt_Order(valid_Order):
             tmp_price_list = []
             for code in self.code:
                 tmp_price_list += [
-                    historical_data_df.query(
-                        'code == @code and date == @order_dealt_time')
-                    ['price'].iloc[0]
+                    market_data_df.query(
+                        'code == @code and time == @order_dealt_time')
+                    ['close'].iloc[0]
                 ]
             return np.array(tmp_price_list)
 
@@ -176,24 +198,14 @@ class dealt_Order(valid_Order):
     def order(self, context):
         amount_list = (np.floor(self.amount / 100) * 100).astype(int)
         extra_fee_list = self.trade_cost(amount_list, context.trade_cost)
-        table_stock, session_stock = context.stock_account.table, context.stock_account.session
-        table_cash, session_cash = context.cash_account.table, context.cash_account.session
         buy_boolean_list = amount_list > 0
         sell_boolean_list = amount_list < 0
         trade_process(amount_list, self.transaction_price, self.code,
                       extra_fee_list, buy_boolean_list, sell_boolean_list,
-                      session_cash, session_stock, table_cash, table_stock,
                       context)
 
-    @staticmethod
-    def order_target(code, target_amount, context):
-        current_date = context.current_date
-        historical_df = context.historical_data_df.copy()
-        code_list, target_amount_list, price_list = get_available_list(
-            code, target_amount, historical_df, current_date)
-        if len(code_list) == 0:
-            print('选中股票市场上无数据，无法购买')
-            return
+    def order_target(self, context):
+        code_list, target_amount_list = self.code, self.target_amount
         table_stock = context.stock_account.table
         session_stock = context.stock_account.session
         amount_list = np.array([
@@ -206,15 +218,12 @@ class dealt_Order(valid_Order):
             target_amount_list[i] for i in range(len(code_list))
         ])
         amount_list = (np.floor(amount_list / 100) * 100).astype(int)
-        extra_fee_list = trade_cost_cal(amount_list, price_list,
-                                        context.trade_cost)
-        table_cash = context.cash_account.table
-        session_cash = context.cash_account.session
+        extra_fee_list = self.trade_cost(amount_list, context.trade_cost)
         buy_boolean_list = amount_list > 0
         sell_boolean_list = amount_list < 0
-        trade_process(amount_list, price_list, code_list, extra_fee_list,
-                      buy_boolean_list, sell_boolean_list, session_cash,
-                      session_stock, table_cash, table_stock, context)
+        trade_process(amount_list, self.transaction_price, self.code,
+                      extra_fee_list, buy_boolean_list, sell_boolean_list,
+                      context)
 
     @staticmethod
     def order_value(code, value, context):
@@ -250,9 +259,9 @@ class dealt_Order(valid_Order):
         print('能卖的全卖了，清仓')
 
     @staticmethod
-    def position_adjust(context,
-                        portfolio='unchanged',
-                        percentage=1,
+    def position_target(context,
+                        code='unchanged',
+                        position_target=1,
                         method='equal weight'):
         '''默认组合不变，只调整仓位，percentage=1则满仓(现金+stock_value),method: equal weight/equal value'''
         table_stock = context.stock_account.table
@@ -265,20 +274,20 @@ class dealt_Order(valid_Order):
         results = session_stock.query(table_stock).all()
         code_in_account = [result.code for result in results]
         df_result_account = historical_df[
-            (historical_df.date == context.current_date)
+            (historical_df.time == context.current_date)
             & (historical_df.code.isin(code_in_account))]
         # 获取账户内可交易股票信息
         code_in_account_available_list = df_result_account.code.values
         price_in_account_available_list = df_result_account.price.values
-        if portfolio == 'unchanged':
+        if code == 'unchanged':
             portfolio_available_list = code_in_account_available_list
             price_portfolio_available_list = price_in_account_available_list
         else:
             historical_df['code'] = historical_df['code'].apply(
                 lambda x: x[:6])
             df_result_portfolio = historical_df[
-                (historical_df.date == context.current_date)
-                & (historical_df.code.isin(portfolio))]
+                (historical_df.time == context.current_date)
+                & (historical_df.code.isin(code))]
             # 获取换仓组合中可交易股票信息
             portfolio_available_list = df_result_portfolio.code.values
             price_portfolio_available_list = df_result_portfolio.price.values
@@ -312,7 +321,7 @@ class dealt_Order(valid_Order):
             weight_list = 100 * price_portfolio_available_list
 
         portfolio_share = np.floor(
-            total_value * percentage /
+            total_value * position_target /
             (weight_list * price_portfolio_available_list).sum())
         if portfolio_share == 0:
             print('构建组合不足1份，换仓失败')
@@ -414,7 +423,7 @@ class order_hub():
                     self.dealt_order.update({k: dealt_order})
 
                 # synchronize relevant account
-                dealt_order.METHOD_chosen(context=context)
+                dealt_order.METHOD_chosen(context)
 
             if canceled_order:
                 if self.canceled_order.get(k):

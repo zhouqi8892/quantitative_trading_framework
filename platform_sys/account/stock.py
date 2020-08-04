@@ -2,9 +2,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from .model import stock_account_fun
-from .settings import db_url_dict, account
+from .settings import account
 import pandas as pd
-
+import json
+with open('./platform_sys/settings/DB_url_settings.json', 'r') as f:
+    db_url_dict = json.load(f)
 
 class stock_account:
     '''实例化实现多账户管理,
@@ -16,7 +18,7 @@ class stock_account:
     def __orm_init(self):
         Base = declarative_base()
         table = stock_account_fun(Base, self.__table_name)
-        engine = create_engine(db_url_dict[account.stock])
+        engine = create_engine(db_url_dict[account.stock.name])
         DBSession = sessionmaker(bind=engine)
         session = DBSession()
         return session, table
@@ -25,7 +27,7 @@ class stock_account:
         '''写为method非attr的原因：实例化赋值attr时，为首次session，而后session变化attr不变。
         而method保证了引用最新的session。
         全账户信息dataframe呈现'''
-        engine = create_engine(db_url_dict[account.stock])
+        engine = create_engine(db_url_dict[account.stock.name])
         return pd.read_sql(self.__table_name, engine)
 
     def code(self):

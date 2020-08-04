@@ -9,15 +9,8 @@ class account(Enum):
     option = 3
 
 
-db_url_dict = {
-    account.cash: 'mysql://root:88923392@localhost:3306/cash_account',
-    account.stock: 'mysql://root:88923392@localhost:3306/stock_account'
-}
-
-
-def stock_account_linkage(session, table, code, amount, price, extra_fee,
-                          context):
-    
+def stock_account_linkage(code, amount, price, extra_fee, context):
+    table, session = context.stock_account.table, context.stock_account.session
     result = session.query(table).get(code)
     if result:  # 加仓/减仓
         result.current_price = price
@@ -38,8 +31,7 @@ def stock_account_linkage(session, table, code, amount, price, extra_fee,
         result.total_amount += amount
         result.market_value = price * result.total_amount
         result.transaction_time = context.current_time
-        # session.commit()
-        # session.close()
+
     else:  # 建仓
         stock_add = table(code=code,
                           current_price=price,
@@ -54,11 +46,14 @@ def stock_account_linkage(session, table, code, amount, price, extra_fee,
                           today_buy_amount=amount,
                           side='long')
         session.add(stock_add)
-        # session.commit()
-        # session.close()
+    session.commit()
+    context.stock_account.table = table
+    context.stock_account.session = session
+    session.close()
 
 
-def cash_account_linkage(session, table, price, amount, extra_fee):
+def cash_account_linkage(price, amount, extra_fee, context):
+    table, session = context.cash_account.table, context.cash_account.session
     result = session.query(table).get('RMB')
     total_cost = Decimal(amount * price + extra_fee)
     result.today_inout += -total_cost
@@ -67,21 +62,25 @@ def cash_account_linkage(session, table, price, amount, extra_fee):
         result.locked_cash += -total_cost
     if amount < 0:
         result.available_cash += -total_cost
-    # session.commit()
-    # session.close()
+    session.commit()
+    context.cash_account.table = table
+    context.cash_account.session = session
+    session.close()
 
 
-def before_buy_request(session_cash, table_cash, extra_fee, amount, price):
-    result = session_cash.query(table_cash).get('RMB')
+def before_buy_request(extra_fee, amount, price, context):
+    table, session = context.cash_account.table, context.cash_account.session
+    result = session.query(table).get('RMB')
     total_cost = Decimal(amount * price + extra_fee)
     result.available_cash += -total_cost
     result.transferable_cash += -total_cost
     result.locked_cash += total_cost
-    # session_cash.commit()
+    session.commit()
 
 
-def before_sell_request(session_stock, table_stock, code, amount):
-    result = session_stock.query(table_stock).get(code)
+def before_sell_request(code, amount, context):
+    table, session = context.stock_account.table, context.stock_account.session
+    result = session.query(table).get(code)
     if result:
         if abs(amount) > result.tradable_amount:
             # 请求卖出的数量上限
@@ -93,6 +92,7 @@ def before_sell_request(session_stock, table_stock, code, amount):
     else:
         print(' %s not in account' % code)
         return False
+    session.commit()
 
 
 def close_market_adjust(context):
@@ -132,10 +132,10 @@ def open_market_adjust(context):
     table_stock = context.stock_account.table
     results = session_stock.query(table_stock).all()
     code_list = [result.code for result in results]
-    df_result = historical_df[(historical_df.date == context.current_time)
+    df_result = historical_df[(historical_df.time == context.current_time)
                               & (historical_df.code.isin(code_list))]
     code_list = df_result.code.values
-    price_list = df_result.price.values
+    price_list = df_result.close.values
     for code, price in zip(code_list, price_list):
         result = session_stock.query(table_stock).get(code)
         result.current_price = price

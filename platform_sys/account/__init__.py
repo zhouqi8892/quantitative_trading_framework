@@ -3,8 +3,11 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from .model import cash_account_fun, stock_account_fun
 from datetime import datetime
-from .settings import account, db_url_dict
+import json
+from .settings import account
 
+with open('./platform_sys/settings/DB_url_settings.json', 'r') as f:
+    db_url_dict = json.load(f)
 
 def account_init(self):
     '''create account sql for backtest'''
@@ -20,7 +23,7 @@ def account_init(self):
         stock_account = stock_account_fun(Base, table_name)
 
         # 初始化数据库连接:
-        engine = create_engine(db_url_dict[account.stock])
+        engine = create_engine(db_url_dict[account.stock.name])
 
         # 创建DBSession类型:
         DBSession = sessionmaker(bind=engine)
@@ -35,7 +38,7 @@ def account_init(self):
         cash_account = cash_account_fun(Base, table_name)
 
         # 初始化数据库连接:
-        engine = create_engine(db_url_dict[account.cash])
+        engine = create_engine(db_url_dict[account.cash.name])
 
         # 创建DBSession类型:
         DBSession = sessionmaker(bind=engine)

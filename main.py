@@ -1,4 +1,4 @@
-from platform_sys.execution.back_test import Hub
+from platform_sys.packages.hub import Hub
 from platform_sys.account.settings import account
 from platform_sys.action.settings import order_cost
 from functools import partial
@@ -15,7 +15,7 @@ from datetime import datetime
 
 class config:
     strategy = 'strategy_demo'
-    start_date = '2018/06/29'
+    start_date = '2018/06/01'
     end_date = '2020/03/04'
     frequency = 'daily'  # 'or tick, minute'
     initial_capital = 1000000000
