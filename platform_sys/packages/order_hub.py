@@ -41,7 +41,7 @@ class order_hub():
                 self.valid_order.update({k: valid_orders})
             if len(invalid_orders.code) != 0:
                 self.invalid_order.update({k: invalid_orders})
-                print(invalid_orders.code, '停牌废单')
+                print(invalid_orders.code, '下单指令作废')
 
     def match_process(self, context):
         '''match valid_order at each loop time,

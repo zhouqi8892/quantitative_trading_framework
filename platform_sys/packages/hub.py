@@ -16,8 +16,6 @@ with open('./platform_sys/settings/transaction_settings.json', 'r') as f:
 class Hub:
     def __init__(self, config: 'class', **kwargs: 'hyperparameters'):
 
-        self.historical_data_df = market_data_df
-
         # overwrite order(from lower to higher): settings.json -> config cls -> hyperparameters
         for account in config.account_list:
             # currently, this frame only for one product, multi products will overwrite attrs

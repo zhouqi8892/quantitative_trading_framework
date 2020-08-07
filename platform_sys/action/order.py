@@ -216,7 +216,8 @@ class Order:
         # two new object
         # 尝试精简化用于valid/invalid和valid/dealt/cancel剥离
         valid_order = valid_Order(self, boolean_array)(context)
-        invalid_order = invalid_Order(self, ~boolean_array)
+        invalid_order = invalid_Order(
+            self, ~boolean_array if boolean_array.size != 0 else boolean_array)
         return valid_order, invalid_order
 
     def instance_attr(self):
@@ -229,23 +230,16 @@ class Order:
         ]
 
 
-class invalid_Order(Order):
-    def __init__(self, parent_self, boolean_array):
-        parent_instance_attr = parent_self.instance_attr()
-        for k, v in parent_instance_attr:
-            setattr(
-                self, k, v[boolean_array] if isinstance(v, np.ndarray)
-                and len(boolean_array) == len(v) else v)
-        # !!!未考虑target_list的boolean
-
-
 class valid_Order(Order):
     def __init__(self, parent_self, boolean_array):
         parent_instance_attr = parent_self.instance_attr()
         for k, v in parent_instance_attr:
+            # to be updated, len == len > 0
+            # >0 for the case 0 position still apply target_position=0
+            # code=boolean=[], cannot boolean index, raise error
             setattr(
                 self, k, v[boolean_array] if isinstance(v, np.ndarray)
-                and len(boolean_array) == len(v) else v)
+                and len(boolean_array) == len(v) > 0 else v)
 
     def __call__(self, context):
         if self.order_type == 'mkt':
@@ -303,10 +297,12 @@ class valid_Order(Order):
         adjust_df['target_amount'] = pd.Series(0, index=clear_stock_list)
 
         # stocks in target_list
-        adjust_df['target_value'] = pd.Series(
-            weight_fun_dict[self.weight_type](adjust_df, self.position_target,
-                                              context),
-            index=target_stock_list)
+        if getattr(self, 'weight_type', False):
+            adjust_df['target_value'] = pd.Series(
+                weight_fun_dict[self.weight_type](adjust_df,
+                                                  self.position_target,
+                                                  context),
+                index=target_stock_list)
         self.adjust_df = adjust_df
 
     def order_match(self,
@@ -338,6 +334,16 @@ class valid_Order(Order):
             # 分批成交，如果len(dealt_order.code)=0，须返回None,以不执行METHOD_chosen操作
             pass
         return valid_order, dealt_order, canceled_order
+
+
+class invalid_Order(Order):
+    def __init__(self, parent_self, boolean_array):
+        parent_instance_attr = parent_self.instance_attr()
+        for k, v in parent_instance_attr:
+            setattr(
+                self, k, v[boolean_array] if isinstance(v, np.ndarray)
+                and len(boolean_array) == len(v) > 0 else v)
+        # !!!未考虑target_list的boolean
 
 
 class dealing_Order:

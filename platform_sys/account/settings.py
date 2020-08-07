@@ -1,3 +1,4 @@
+from platform_sys.data.data_prepare import market_data_df
 from enum import Enum
 from decimal import Decimal
 
@@ -7,9 +8,6 @@ class account(Enum):
     stock = 1
     future = 2
     option = 3
-
-
-
 
 
 def close_market_adjust(context):
@@ -43,14 +41,13 @@ def close_market_adjust(context):
 
 
 def open_market_adjust(context):
-    historical_df = context.historical_data_df.copy()
-    historical_df['code'] = historical_df['code'].apply(lambda x: x[:6])
+
     session_stock = context.stock_account.session
     table_stock = context.stock_account.table
     results = session_stock.query(table_stock).all()
     code_list = [result.code for result in results]
-    df_result = historical_df[(historical_df.time == context.current_time)
-                              & (historical_df.code.isin(code_list))]
+    df_result = market_data_df[(market_data_df.time == context.current_time)
+                               & (market_data_df.code.isin(code_list))]
     code_list = df_result.code.values
     price_list = df_result.close.values
     for code, price in zip(code_list, price_list):
