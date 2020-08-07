@@ -16,7 +16,7 @@ def market_open(context):
     # else:
     #     position_adjust(context, percentage=0.9, method='equal weight')
     #     # pass
-    Order(['000001','000003'],amount=[100,200])
+    Order([],position_target=0)
 
     # print(context.stock_account.detail())
     # print(context.current_date)

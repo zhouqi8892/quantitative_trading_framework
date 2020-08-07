@@ -1,4 +1,3 @@
-
 class order_hub():
     def __init__(self):
 
@@ -19,13 +18,14 @@ class order_hub():
             # e.g., latest_order_idx=0, order_shelve['0']=2--> diff=2(last two are new comer [-2:])
             diff = int(order_shelve['0']) - self.latest_order_idx
 
-            # record current_time as order_establish_time
+            # record context.current_time as order_establish_time
+            # update code to be traded(including stocks in account) if apply portfolio_adjust_methods
             new_orders = {
-                k: v(context.current_time)
+                k: v(context)
                 for k, v in list(order_shelve.items())[-diff:]
             }
 
-            self.validate_process(new_orders)
+            self.validate_process(new_orders, context)
 
             # update latest_order_idx for next judgement
             self.latest_order_idx = int(order_shelve['0'])
@@ -33,15 +33,15 @@ class order_hub():
         # match_process conducts at each loop time
         self.match_process(context)
 
-    def validate_process(self, new_orders):
+    def validate_process(self, new_orders, context):
         '''classify new orders to valid_order/invalid_order'''
         for k, v in new_orders.items():
-            valid_orders, invalid_orders = v.order_validity()
+            valid_orders, invalid_orders = v.order_validity(context)
             if len(valid_orders.code) != 0:
                 self.valid_order.update({k: valid_orders})
             if len(invalid_orders.code) != 0:
                 self.invalid_order.update({k: invalid_orders})
-                print(invalid_orders.code,'停牌废单')
+                print(invalid_orders.code, '停牌废单')
 
     def match_process(self, context):
         '''match valid_order at each loop time,

@@ -30,28 +30,35 @@ def equal_amount(portfolio_list, percentage, context):
         return portfolio_amount_list
 
 
-def equal_weighted(portfolio_list, percentage, context):
+def equal_weighted(adjust_df, position_target, context):
     '''equal amount先将账户中组合以外的股票卖出再计算组合weight，仓位更精确'''
-    position_dict = context.portfolio.subportfolios[0].long_positions
-    current_data = get_current_data()
-    #-----------------------计算账户有效资产总价值（现金+股票）-----------------------
-    cash_avai_value = context.portfolio.subportfolios[0].available_cash
-    account_stock_value = context.portfolio.subportfolios[0].positions_value
-    account_paused_stock_total_value = sum([
-        position_dict[stock].value for stock in position_dict.keys()
-        if current_data[stock].paused
-    ])  # 排除停牌不可卖的股票价值
-    total_avai_value = cash_avai_value + account_stock_value - account_paused_stock_total_value
-    #---------------------------------------------------------------------------------
+    #----------------计算账户有效资产总价值（现金+类现金股票有效价值+股票价值）-----------------
+    cash_account = context.cash_account
+    cash_avai_value = cash_account.available_cash
 
-    value_list = np.ones(
-        len(portfolio_list)) * total_avai_value / len(portfolio_list)
-    # equal values
-    price_portfolio_available_list = np.array(
-        [current_data[code].last_price for code in portfolio_list])
+    stock_account = context.stock_account
 
-    portfolio_amount_list = value_list / price_portfolio_available_list
-    return portfolio_amount_list
+    # stock in both in account and target list
+    account_avai_stock_value = sum([
+        stock_account.market_value(code) for code in adjust_df.query(
+            'account_amount != 0 and target_amount != 0').index
+    ])
+
+    # stocks in account but not in target_list
+    cash_like_stock_value = sum([
+        stock_account.current_price(code) * stock_account.tradable_amount(code)
+        for code in adjust_df.query(
+            'account_amount != 0 and target_amount == 0').index
+    ])
+
+    total_avai_value = cash_avai_value + cash_like_stock_value + account_avai_stock_value
+    #---------------------------------equal values---------------------------------------
+
+    target_list = adjust_df.query('target_amount != 0').index
+    target_value_list = np.ones(
+        target_list.size) * total_avai_value * position_target / target_list.size
+
+    return target_value_list
 
 
 def value_weighted(portfolio_list, percentage, context):
@@ -89,8 +96,8 @@ def value_weighted(portfolio_list, percentage, context):
 
 
 weight_fun_dict = {
-    'equal_amount': equal_amount,
-    'value_weighted': value_weighted,
-    'price_weighted': 0,
-    'equal_weighted': equal_weighted,
+    'euqual_amount_weight': equal_amount,
+    'value_weight': value_weighted,
+    'equal_risk_weight': 0,
+    'equal_value_weight': equal_weighted,
 }

@@ -34,7 +34,7 @@ class Hub:
             setattr(self, key, value)
 
     def back_test(self):
-        for cur_time in self.back_test_init():
+        for cur_time in self.back_test_init:
             print(cur_time)
             self.current_time = cur_time
 
@@ -50,6 +50,7 @@ class Hub:
             close_market_adjust(self)
             eval(f'strategy.{self.strategy}.market_close')(self)
 
+    @property
     def back_test_init(self):
         table_name = account_init(self)
         self.cash_account = cash_account(table_name)

@@ -3,11 +3,12 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from .model import cash_account_fun, stock_account_fun
 from datetime import datetime
-import json
 from .settings import account
+import json
 
 with open('./platform_sys/settings/DB_url_settings.json', 'r') as f:
     db_url_dict = json.load(f)
+
 
 def account_init(self):
     '''create account sql for backtest'''

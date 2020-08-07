@@ -3,6 +3,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from platform_sys.account.model import cash_account_fun
 from sqlalchemy import create_engine
 import pandas as pd
+import numpy as np
 import json
 
 with open('./platform_sys/settings/DB_url_settings.json') as f:
@@ -31,25 +32,44 @@ class cash_account:
         engine = create_engine(db_url_dict['cash'])
         return pd.read_sql(self.__table_name, engine)
 
+    @property
     def currency(self):
-        return [i.currency for i in self.session.query(self.table).all()]
+        return np.array(
+            [i.currency for i in self.session.query(self.table).all()],
+            np.float)[0]
 
+    @property
     def inout_cash(self):
-        return [i.inout_cash for i in self.session.query(self.table).all()]
+        return np.array(
+            [i.inout_cash for i in self.session.query(self.table).all()],
+            np.float)[0]
 
+    @property
     def available_cash(self):
-        return [i.available_cash for i in self.session.query(self.table).all()]
+        return np.array(
+            [i.available_cash for i in self.session.query(self.table).all()],
+            np.float)[0]
 
+    @property
     def transferable_cash(self):
-        return [
+        return np.array([
             i.transferable_cash for i in self.session.query(self.table).all()
-        ]
+        ], np.float)[0]
 
+    @property
     def locked_cash(self):
-        return [i.locked_cash for i in self.session.query(self.table).all()]
+        return np.array(
+            [i.locked_cash for i in self.session.query(self.table).all()],
+            np.float)[0]
 
+    @property
     def margin(self):
-        return [i.margin for i in self.session.query(self.table).all()]
+        return np.array(
+            [i.margin for i in self.session.query(self.table).all()],
+            np.float)[0]
 
+    @property
     def starting_cash(self):
-        return [i.starting_cash for i in self.session.query(self.table).all()]
+        return np.array(
+            [i.starting_cash for i in self.session.query(self.table).all()],
+            np.float)[0]
